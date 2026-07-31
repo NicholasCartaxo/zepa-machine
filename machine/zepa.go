@@ -2,6 +2,7 @@ package machine
 
 import (
 	"slices"
+	"sync"
 )
 
 type Register uint32
@@ -88,8 +89,8 @@ const (
 	clockInt uint32 = iota
 	inputInt
 	killInt
-	syscallInt
-	faultInt
+	syscallExc
+	faultExc
 )
 
 const TIMER_INTERVAL = 128
@@ -134,12 +135,14 @@ type Instruction struct {
 type Machine struct {
 	memory     []byte
 	registers  map[Register]uint32
+	mu         sync.RWMutex
 	killFlag   bool
 	inputFlag  bool
 	debugFlag  bool
 	StepChan   chan struct{}
 	DoneChan   chan struct{}
 	checkpoint *Machine
+	quitChan   chan struct{}
 }
 
 func (m *Machine) mv(inst Instruction) {
@@ -171,10 +174,20 @@ func (m *Machine) mul(inst Instruction) {
 }
 
 func (m *Machine) udiv(inst Instruction) {
+	if m.registers[inst.rs2] == 0 {
+		m.exception(faultExc)
+		return
+	}
+
 	m.registers[inst.rd] = m.registers[inst.rs1] / m.registers[inst.rs2]
 }
 
 func (m *Machine) sdiv(inst Instruction) {
+	if m.registers[inst.rs2] == 0 {
+		m.exception(faultExc)
+		return
+	}
+
 	m.registers[inst.rd] = uint32(int32(m.registers[inst.rs1]) / int32(m.registers[inst.rs2]))
 }
 
@@ -299,14 +312,14 @@ func (m *Machine) mret(inst Instruction) {
 
 func (m *Machine) syscall(inst Instruction) {
 	m.registers[w9] = uint32(inst.immediate)
-	m.exception(syscallInt)
+	m.exception(syscallExc)
 }
 
 func (m *Machine) translate(addr uint32, addrOffset uint32) (uint32, bool) {
 	if !m.isKernelMode() {
 		addr = addr + m.registers[base]
 		if addr+addrOffset >= m.registers[limit] {
-			m.exception(faultInt)
+			m.exception(faultExc)
 			return addr, false
 		}
 	}
@@ -421,9 +434,7 @@ func (m *Machine) decode() (Instruction, bool) {
 	case MV, JUMP, BEQ, BLT, BGT, LDD, STRD, SYSCALL, MRET:
 		return m.decodeITypeInst(instruction), true
 	default:
-		if m.isInterruptEnabled() {
-			m.exception(faultInt)
-		}
+		m.exception(faultExc)
 		return Instruction{}, false
 	}
 }
@@ -442,7 +453,11 @@ func (m *Machine) Boot() {
 	for {
 
 		if m.debugFlag {
-			<-m.StepChan
+			select {
+			case <-m.StepChan:
+			case <-m.quitChan:
+				return
+			}
 		}
 
 		if !m.fetch() {
@@ -454,15 +469,16 @@ func (m *Machine) Boot() {
 			goto endStep
 		}
 
-		if m.isInterruptEnabled() {
-			if m.checkIllegalRegisterAccess(decodedInstruction) {
-				m.exception(faultInt)
-				goto endStep
-			}
-			if m.checkIllegalInstruction(decodedInstruction) {
-				m.exception(faultInt)
-				goto endStep
-			}
+		m.mu.Lock()
+		if m.checkIllegalRegisterAccess(decodedInstruction) {
+			m.exception(faultExc)
+			m.mu.Unlock()
+			goto endStep
+		}
+		if m.checkIllegalInstruction(decodedInstruction) {
+			m.exception(faultExc)
+			m.mu.Unlock()
+			goto endStep
 		}
 
 		m.execute(decodedInstruction)
@@ -480,6 +496,7 @@ func (m *Machine) Boot() {
 				m.inputFlag = false
 			}
 		}
+		m.mu.Unlock()
 
 	endStep:
 		if m.debugFlag {
@@ -519,6 +536,14 @@ func (m *Machine) GetMemory() []byte {
 	return m.memory
 }
 
+func (m *Machine) ReadWord(addr uint32) uint32 {
+	var word uint32
+	for i := uint32(0); i < 4; i++ {
+		word |= uint32(m.memory[addr+i]) << (24 - 8*i)
+	}
+	return word
+}
+
 func (m *Machine) LoadBuffer(buffer []byte) bool {
 	if len(buffer) > bufferSize-4 {
 		return false
@@ -548,6 +573,10 @@ func (m *Machine) IsDebugMode() bool {
 	return m.debugFlag
 }
 
+func (m *Machine) Quit() {
+	close(m.quitChan)
+}
+
 func (m *Machine) GetRegisters() map[Register]uint32 {
 
 	return m.registers
@@ -560,6 +589,7 @@ func NewMachine(memoryBytes int, debugFlag bool) *Machine {
 		debugFlag: debugFlag,
 		StepChan:  make(chan struct{}),
 		DoneChan:  make(chan struct{}),
+		quitChan:  make(chan struct{}),
 	}
 
 	return machine
