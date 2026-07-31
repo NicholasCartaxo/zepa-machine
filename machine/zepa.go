@@ -133,16 +133,17 @@ type Instruction struct {
 }
 
 type Machine struct {
-	memory     []byte
-	registers  map[Register]uint32
-	mu         sync.RWMutex
-	killFlag   bool
-	inputFlag  bool
-	debugFlag  bool
-	StepChan   chan struct{}
-	DoneChan   chan struct{}
-	checkpoint *Machine
-	quitChan   chan struct{}
+	memory               []byte
+	registers            map[Register]uint32
+	mu                   sync.RWMutex
+	killFlag             bool
+	inputFlag            bool
+	debugFlag            bool
+	StepChan             chan struct{}
+	DoneChan             chan struct{}
+	checkpoint           *Machine
+	quitChan             chan struct{}
+	instructionsExecuted uint64
 }
 
 func (m *Machine) mv(inst Instruction) {
@@ -445,7 +446,7 @@ func (m *Machine) execute(inst Instruction) {
 
 func (m *Machine) Boot() {
 	m.registers[limit] = uint32(len(m.memory))
-	instructionsExcecuted := 0
+	clockCounter := 0
 
 	var decodedInstruction Instruction
 	var ok bool
@@ -482,11 +483,12 @@ func (m *Machine) Boot() {
 		}
 
 		m.execute(decodedInstruction)
+		m.instructionsExecuted++
 
 		if m.isInterruptEnabled() {
-			instructionsExcecuted++
+			clockCounter++
 
-			if instructionsExcecuted%TIMER_INTERVAL == 0 {
+			if clockCounter%TIMER_INTERVAL == 0 {
 				m.exception(clockInt)
 			} else if m.killFlag {
 				m.exception(killInt)
@@ -580,6 +582,12 @@ func (m *Machine) Quit() {
 func (m *Machine) GetRegisters() map[Register]uint32 {
 
 	return m.registers
+}
+
+func (m *Machine) GetInstructionsExecuted() uint64 {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	return m.instructionsExecuted
 }
 
 func NewMachine(memoryBytes int, debugFlag bool) *Machine {
