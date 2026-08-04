@@ -97,7 +97,7 @@ func main() {
 
 	// CLI loop
 	scanner := bufio.NewScanner(os.Stdin)
-	fmt.Println("Commands: d (step), r (restore), reg (registers), pcb (processes), kill <pid>, input <path>")
+	fmt.Println("Commands: d (step), r (restore), reg (registers), pcb (processes), c (instruction counter), kill <pid>, input <path>")
 	for scanner.Scan() {
 		line := strings.TrimSpace(scanner.Text())
 		parts := strings.Fields(line)
