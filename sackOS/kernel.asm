@@ -790,7 +790,7 @@ fork:
 wait:
     MV W0 #0x102C ; w0 points to pcb_v[0] first byte
     MV W8 #52 
-    ADD W0 W8 ; w0 points to pcb_v[0].w8
+    ADD W0 W0 W8 ; w0 points to pcb_v[0].w8
     MV W8 #84 ; bytes size of each pcb
 
     LDD W1 #0x1018 ; running_pid
@@ -1059,8 +1059,12 @@ kill:
       MV W4, #9           ; mapped = 1, zombie = 0, waiting = 0, state = ready
       STRB W4, W3
 
-      MV W4, #8
-      SUB W3, W3, W4      ; W3 = pcb_v[parent].BASE address
+      MV W4, #24
+      SUB W3, W3, W4      ; W3 = pcb_v[parent].W9 address
+      STORE W9, W3        ; pcb_v[parent].W9 = pid
+
+      MV W4, #16
+      ADD W3, W3, W4      ; W3 = pcb_v[parent].BASE address
       LOAD W4, W3         ; W4 = pcb_v[parent].BASE
 
       MV W5, #56
@@ -1191,6 +1195,12 @@ kill:
 
 
 schedule:
+
+    ; clock_interrupt_count = 0
+    ; Every process selected by the scheduler starts with a new time slice
+
+    MV W0, #0
+    STRD W0, #0x101C ; clock_interrupt_count
 
     ; valida running_pid
 
