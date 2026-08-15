@@ -115,8 +115,9 @@ func main() {
 				fmt.Println("invalid PID")
 				continue
 			}
-			mem := machine.GetMemory()
-			binary.LittleEndian.PutUint32(mem[len(mem)-64*1024:len(mem)-64*1024+4], uint32(pid))
+			buffer := make([]byte, 4)
+			binary.LittleEndian.PutUint32(buffer, uint32(pid))
+			machine.LoadBuffer(buffer)
 			machine.SetKillFlag()
 			fmt.Printf("kill %d sent\n", pid)
 

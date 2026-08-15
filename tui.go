@@ -94,8 +94,9 @@ func runTUIWithMachine(m *machine.Machine) {
 			if err != nil {
 				return
 			}
-			mem := m.GetMemory()
-			binary.LittleEndian.PutUint32(mem[len(mem)-64*1024:len(mem)-64*1024+4], uint32(pid))
+			var buf [4]byte
+			binary.LittleEndian.PutUint32(buf[:], uint32(pid))
+			m.LoadBuffer(buf[:])
 			m.SetKillFlag()
 
 		case "input":
