@@ -298,7 +298,7 @@ func waitForDeath(mem []byte, pid uint32, timeout time.Duration) bool {
 func killPID(m *machine.Machine, pid uint32) {
 	buf := make([]byte, 4)
 	binary.LittleEndian.PutUint32(buf, pid)
-	copy(m.GetMemory()[len(m.GetMemory())-bufferSize:], buf)
+	m.LoadBuffer(buf)
 	m.SetKillFlag()
 }
 
